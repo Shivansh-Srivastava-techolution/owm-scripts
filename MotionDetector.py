@@ -6,6 +6,7 @@ from shapely.geometry import Polygon, Point
 
 from mark_points import mark_polygons_from_image
 
+
 class MotionDetector:
     def __init__(self, no_motion_frames_threshold=5):
         self.prev_gray = None
@@ -20,17 +21,19 @@ class MotionDetector:
         self.start_frame = None
         self.end_frame = None
         self.capture_start_frame = False
+        self.scale_factor = 0.5
+        self.frame_motion_threshold = 0.2
+        self.compartment_motion_threshold = 0.5
         
     def process_frame(self, frame):
-        scale_factor = 0.5
-        small_frame = cv2.resize(frame, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_AREA)
+        small_frame = cv2.resize(frame, None, fx=self.scale_factor, fy=self.scale_factor, interpolation=cv2.INTER_AREA)
         current_gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
         if self.prev_gray is None:
             self.prev_gray = current_gray
             return
 
         flow = cv2.calcOpticalFlowFarneback(self.prev_gray, current_gray, None, **self.flow_params)
-        avg_motion_compartment = self.calculate_avg_motion(flow, current_gray, scale_factor)
+        avg_motion_compartment = self.calculate_avg_motion(flow, current_gray, self.scale_factor)
 
         self.update_motion_status(avg_motion_compartment, frame)
         cv2.polylines(frame, [self.compartment1_points], True, (255, 0, 0), 2)
@@ -38,22 +41,14 @@ class MotionDetector:
         self.prev_gray = current_gray
         cv2.imshow('Motion Detection', frame)
 
-    def calculate_avg_motion(self, flow, current_gray, scale_factor):
+    def calculate_avg_motion(self, flow):
         motion_mag = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
         avg_motion = np.mean(motion_mag)  # Calculate the mean motion magnitude for the entire frame
         return(avg_motion)
-        # avg_motion_compartment = []
-        # for points in [self.compartment1_points, self.compartment2_points]:
-        #     mask = np.zeros_like(current_gray)
-        #     cv2.fillPoly(mask, [np.int32(points * scale_factor)], 1)
-        #     motion_mag = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
-        #     avg_motion = np.sum(motion_mag * mask) / np.sum(mask)
-        #     avg_motion_compartment.append(avg_motion)
-        # return avg_motion_compartment
 
     def update_motion_status(self, avg_motion_compartment, frame):
-        print(avg_motion_compartment)
-        if avg_motion_compartment > 0.2:
+        # print(avg_motion_compartment)
+        if avg_motion_compartment > self.frame_motion_threshold:
             if not self.motion_detected:
                 self.motion_detected = True
                 self.no_motion_frame_count = 0
@@ -63,7 +58,7 @@ class MotionDetector:
             if self.motion_detected:
                 self.no_motion_frame_count += 1                
 
-        print(self.no_motion_frame_count)
+        # print(self.no_motion_frame_count)
 
         if self.motion_detected and self.no_motion_frame_count >= self.no_motion_frames_threshold:
             self.end_frame = frame.copy()
@@ -91,7 +86,7 @@ class MotionDetector:
             avg_flow_magnitude = np.sum(compartment_flow_mag) / cv2.countNonZero(mask)
             avg_flow_magnitudes.append(avg_flow_magnitude)
 
-            motion_in_compartments.append(avg_flow_magnitude > 0.5)  # Adjust the threshold as needed
+            motion_in_compartments.append(avg_flow_magnitude > self.compartment_motion_threshold)  # Adjust the threshold as needed
         print(motion_in_compartments)
         print(avg_flow_magnitudes)
 
@@ -108,19 +103,19 @@ class MotionDetector:
                 cv2.fillPoly(frame, pts=[self.compartment2_points], color=(255, 0, 255))
         else:
             # Handle individual compartment motion detection with significant average flow magnitude
-            if avg_flow_magnitudes[0] and avg_flow_magnitudes[0] > 0.5:
+            if avg_flow_magnitudes[0] and avg_flow_magnitudes[0] > self.compartment_motion_threshold:
                 print("Motion in compartment 1")
                 self.start_frame = frame.copy()
                 print("Saved")
                 cv2.fillPoly(frame, pts=[self.compartment1_points], color=(0, 0, 255))
-            elif motion_in_compartments[1] and avg_flow_magnitudes[1] > 0.5:
+            elif motion_in_compartments[1] and avg_flow_magnitudes[1] > self.compartment_motion_threshold:
                 print("Motion in compartment 2") 
                 self.start_frame = frame.copy()
                 print("Saved")
                 cv2.fillPoly(frame, pts=[self.compartment2_points], color=(0, 0, 255))
 
     def run(self):
-        cap = cv2.VideoCapture(r"input\0OmQ7ta4.mp4")
+        cap = cv2.VideoCapture(3)
         c = 0
         while True:
             ret, frame = cap.read()
@@ -129,9 +124,9 @@ class MotionDetector:
 
             if not self.points_marked:
                 cv2.imwrite("frame.png", frame)
-                # self.compartment1_points, self.compartment2_points = mark_polygons_from_image(frame)
-                self.compartment1_points = [(221, 24), (73, 39), (88, 234), (163, 322), (289, 230), (335, 206), (376, 14)]
-                self.compartment2_points =  [(384, 15), (352, 205), (235, 274), (175, 305), (169, 333), (307, 477), (354, 479), (441, 479), (618, 220), (637, 169), (637, 66)]
+                self.compartment1_points, self.compartment2_points = mark_polygons_from_image(frame)
+                # self.compartment1_points = [(221, 24), (73, 39), (88, 234), (163, 322), (289, 230), (335, 206), (376, 14)]
+                # self.compartment2_points =  [(384, 15), (352, 205), (235, 274), (175, 305), (169, 333), (307, 477), (354, 479), (441, 479), (618, 220), (637, 169), (637, 66)]
                 
                 self.compartment1_polygon = Polygon(self.compartment1_points)
                 self.compartment2_polygon = Polygon(self.compartment2_points)
